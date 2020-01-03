@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+# This is only relevant to my specific development workflow. It rsyncs the code
+# to the remote machine which receives the webhook requests from Telegram and
+# builds it.
+
+rsync -a --progress --delete \
+    --exclude=.git --exclude=target \
+    . chatbot:running-mate/
+ssh chatbot docker build -t running-mate running-mate/
