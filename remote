@@ -7,4 +7,4 @@
 rsync -a --progress --delete \
     --exclude=.git --exclude=target \
     . chatbot:running-mate/
-ssh chatbot docker build -t running-mate running-mate/
+ssh chatbot "cd running-mate/ && docker-compose up --build -d"

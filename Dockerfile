@@ -10,9 +10,13 @@ RUN USER=root cargo init
 COPY Cargo.* ./
 # This is a dummy build to get the dependencies cached
 RUN cargo build --target x86_64-unknown-linux-musl --release
-# Copy over the code & build it
+# Copy over the code
 COPY src/ src/
-RUN cargo build --target x86_64-unknown-linux-musl --release
+# Sleeping and touching before building is necessary so the timestamp of
+# main.rs is not the same it was when we initialized the empty project for
+# dependency caching
+RUN sleep 1 && touch src/main.rs && \
+  cargo build --target x86_64-unknown-linux-musl --release
 
 # Final image -----------------------------------------------------------------
 FROM alpine:3
