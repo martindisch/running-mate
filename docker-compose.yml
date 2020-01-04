@@ -1,0 +1,16 @@
+version: "3.7"
+services:
+  db:
+    image: mongo:4-bionic
+    restart: always
+    volumes:
+      - mongo:/data/db
+  bot:
+    build: .
+    restart: on-failure
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+volumes:
+  mongo:
