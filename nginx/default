@@ -1,0 +1,8 @@
+server {
+    return 301 https://$host$request_uri;
+
+    listen 80;
+    listen [::]:80;
+    server_name runningmate.ddns.net;
+    return 404;
+}
