@@ -6,6 +6,8 @@ applies to:
 - actix-rt, Copyright (c) 2017 Nikolay Kim
 - bson, Copyright (c) 2015 Y. T. CHUNG <zonyitoo@gmail.com>
 - serde_json
+- log, Copyright (c) 2014 The Rust Project Developers
+- simplelog, Copyright (c) 2015 Victor Brekenfeld
 -------------------------------------------------------------------------------
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -34,6 +36,8 @@ applies to:
 - actix-rt
 - mongodb
 - serde_json
+- log
+- simplelog
 -------------------------------------------------------------------------------
                                  Apache License
                            Version 2.0, January 2004
