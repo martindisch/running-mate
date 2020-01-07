@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 
-# This is only relevant to my specific development workflow. It rsyncs the code
-# to the remote machine which receives the webhook requests from Telegram and
-# builds it.
+# This is only relevant to my specific development workflow. It builds the
+# image locally, syncs the code and the image and starts everything on the
+# remote with docker-compose. This means we don't have to build on the remote,
+# which can be any old potato.
 
+# Build locally and save to file
+docker-compose build
+docker save -o /tmp/running-mate_bot.tar running-mate_bot
+# Sync the code
 rsync -a --progress --delete \
     --exclude=.git --exclude=target \
     . chatbot:running-mate/
-ssh chatbot "cd running-mate/ && docker-compose up --build -d"
+# Sync the image
+rsync -a --progress /tmp/running-mate_bot.tar chatbot:/tmp/running-mate_bot.tar
+# Load image and deploy
+ssh chatbot "docker load -i /tmp/running-mate_bot.tar && \
+             cd running-mate/ && docker-compose up -d"
