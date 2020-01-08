@@ -1,15 +1,28 @@
 use actix_web::{web, HttpResponse};
-use log::{debug, info};
+use bson::{bson, doc};
+use log::{debug, error, info};
+use mongodb::{error::Error, Collection};
 use serde_json::{json, Value};
 
 /// Deals with the Telegram Bot API, delegating the processing of the message.
-pub async fn handle_webhook(update: web::Json<Value>) -> HttpResponse {
+pub async fn handle_webhook(
+    update: web::Json<Value>,
+    users: web::Data<Collection>,
+) -> HttpResponse {
     if let Ok((chat_id, user_id, user_name, text)) =
         extract_message_data(&update)
     {
         debug!("Received valid request: {}", update);
         // Get our response
-        let response = handle_message(user_id, user_name, text).await;
+        let response = match handle_message(user_id, user_name, text, &users)
+            .await
+        {
+            Ok(response) => response,
+            Err(msg) => {
+                error!("Error while responding: {}", msg);
+                "I encountered an internal error. Sorry about that 😬".into()
+            }
+        };
         // Reply by responding to the original HTTP request
         HttpResponse::Ok().json(json!(
             {"method": "sendMessage", "chat_id": chat_id, "text": response}
@@ -40,6 +53,17 @@ fn extract_message_data(update: &Value) -> Result<(u64, u64, &str, &str), ()> {
 }
 
 /// Deals with the user message and provides a response.
-async fn handle_message(user_id: u64, user_name: &str, text: &str) -> String {
-    format!("Hello, {}! You sent:\n{}", user_name, text)
+async fn handle_message(
+    user_id: u64,
+    user_name: &str,
+    text: &str,
+    users: &Collection,
+) -> Result<String, Error> {
+    if let Some(user_data) = users.find_one(doc! {"user_id": user_id}, None)? {
+        Ok(format!("Welcome back, {}! You sent:\n{}", user_name, text))
+    } else {
+        info!("New user {} with ID {}", user_name, user_id);
+        users.insert_one(doc! {"user_id": user_id}, None)?;
+        Ok(format!("Welcome, {}! You were added to the DB.", user_name))
+    }
 }
