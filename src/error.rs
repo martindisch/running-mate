@@ -1,3 +1,5 @@
+//! Error types.
+
 use std::{error, fmt};
 
 /// The error type wrapping various library errors.
