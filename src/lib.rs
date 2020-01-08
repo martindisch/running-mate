@@ -1,8 +1,11 @@
 use actix_web::{web, HttpResponse};
 use bson::{bson, doc};
 use log::{debug, error, info};
-use mongodb::{error::Error, Collection};
+use mongodb::Collection;
 use serde_json::{json, Value};
+use tokio::task;
+
+mod error;
 
 /// Deals with the Telegram Bot API, delegating the processing of the message.
 pub async fn handle_webhook(
@@ -58,12 +61,23 @@ async fn handle_message(
     user_name: &str,
     text: &str,
     users: &Collection,
-) -> Result<String, Error> {
-    if let Some(user_data) = users.find_one(doc! {"user_id": user_id}, None)? {
+) -> Result<String, error::InternalError> {
+    // This is unfortunately necessary for spawn_blocking
+    let users_f = users.clone();
+    let users_i = users.clone();
+    // Query user data and add if it doesn't exist yet
+    if let Some(user_data) = task::spawn_blocking(move || {
+        users_f.find_one(doc! {"user_id": user_id}, None)
+    })
+    .await??
+    {
         Ok(format!("Welcome back, {}! You sent:\n{}", user_name, text))
     } else {
         info!("New user {} with ID {}", user_name, user_id);
-        users.insert_one(doc! {"user_id": user_id}, None)?;
+        task::spawn_blocking(move || {
+            users_i.insert_one(doc! {"user_id": user_id}, None)
+        })
+        .await??;
         Ok(format!("Welcome, {}! You were added to the DB.", user_name))
     }
 }
