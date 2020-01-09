@@ -5,9 +5,9 @@ use bson::{bson, doc};
 use log::{debug, error, info};
 use mongodb::Collection;
 use serde_json::{json, Value};
-use tokio::task;
 
-use crate::error::InternalError;
+/// Convenience type for wrapping blocking DB access in async.
+type DbError = actix_threadpool::BlockingError<mongodb::error::Error>;
 
 /// Deals with the Telegram Bot API, delegating the processing of the message.
 pub async fn handle_webhook(
@@ -63,23 +63,23 @@ async fn handle_message(
     user_name: &str,
     text: &str,
     users: &Collection,
-) -> Result<String, InternalError> {
+) -> Result<String, DbError> {
     // This is unfortunately necessary for spawn_blocking
     let users_f = users.clone();
     let users_i = users.clone();
     // Query user data and add if it doesn't exist yet
-    if let Some(user_data) = task::spawn_blocking(move || {
+    if let Some(user_data) = actix_threadpool::run(move || {
         users_f.find_one(doc! {"user_id": user_id}, None)
     })
-    .await??
+    .await?
     {
         Ok(format!("Welcome back, {}! You sent:\n{}", user_name, text))
     } else {
         info!("New user {} with ID {}", user_name, user_id);
-        task::spawn_blocking(move || {
+        actix_threadpool::run(move || {
             users_i.insert_one(doc! {"user_id": user_id}, None)
         })
-        .await??;
+        .await?;
         Ok(format!("Welcome, {}! You were added to the DB.", user_name))
     }
 }
