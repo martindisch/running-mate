@@ -7,6 +7,8 @@ applies to:
 - serde_json
 - log, Copyright (c) 2014 The Rust Project Developers
 - simplelog, Copyright (c) 2015 Victor Brekenfeld
+- rand, Copyright 2018 Developers of the Rand project
+        Copyright (c) 2014 The Rust Project Developers
 -------------------------------------------------------------------------------
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -36,6 +38,7 @@ applies to:
 - serde_json
 - log
 - simplelog
+- rand
 -------------------------------------------------------------------------------
                                  Apache License
                            Version 2.0, January 2004

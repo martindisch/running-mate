@@ -3,6 +3,8 @@ use mongodb::Client;
 use simplelog::{ConfigBuilder, LevelFilter, SimpleLogger};
 use std::env;
 
+use running_mate::{Dialogue, State};
+
 /// The main entrypoint, which starts the web server.
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
@@ -27,6 +29,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .data(collection.clone())
+            .data(Dialogue::from_state(State::Initial))
             .route(&endpoint, web::post().to(running_mate::handle_webhook))
     })
     .bind("0.0.0.0:8080")?
