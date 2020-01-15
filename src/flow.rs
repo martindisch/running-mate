@@ -1,5 +1,6 @@
 //! Dialogue flow control.
 
+use mongodb::Collection;
 use rand::prelude::*;
 use std::collections::HashMap;
 
@@ -64,16 +65,16 @@ impl<'a> Dialogue<'a> {
         state_table.insert(
             State::Initial,
             (
-                &|_| Ok("Sorry to see you go.".into()),
+                &|_, _| Ok("Sorry to see you go.".into()),
                 "You'll never see this error",
-                &|_| Ok(Ok((State::CheckName, None))),
+                &|_, _, _| Ok(Ok((State::CheckName, None))),
             ),
         );
 
         state_table.insert(
             State::CheckName,
             (
-                &|_| {
+                &|_, _| {
                     let messages = [
                         "Hi there! May I call you XXX?",
                         "Welcome, good to see you! Can I call you XXX?",
@@ -82,7 +83,7 @@ impl<'a> Dialogue<'a> {
                     Ok(messages[selected].into())
                 },
                 "Sorry, I didn't quite catch that. Can I call you XXX?",
-                &|response| match response {
+                &|response, _, _| match response {
                     "Sure" => Ok(Ok((State::DetermineExperience, None))),
                     "No, YYY" => Ok(Ok((State::DetermineExperience, None))),
                     "No" => Ok(Ok((State::RequestName, None))),
@@ -94,7 +95,7 @@ impl<'a> Dialogue<'a> {
         state_table.insert(
             State::RequestName,
             (
-                &|_| {
+                &|_, _| {
                     let messages = [
                         "Then what can I call you?",
                         "What's your name then?",
@@ -103,7 +104,7 @@ impl<'a> Dialogue<'a> {
                     Ok(messages[selected].into())
                 },
                 "Can you try again?",
-                &|response| match response {
+                &|response, _, _| match response {
                     "YYY" => Ok(Ok((State::DetermineExperience, None))),
                     _ => Ok(Err(())),
                 },
@@ -113,7 +114,7 @@ impl<'a> Dialogue<'a> {
         state_table.insert(
             State::DetermineExperience,
             (
-                &|_| {
+                &|_, _| {
                     let messages = [
                         "Ok, YYY! Do you have any running experience?",
                         "Cool! Did you use to run before?",
@@ -122,7 +123,7 @@ impl<'a> Dialogue<'a> {
                     Ok(messages[selected].into())
                 },
                 "I'm afraid I don't understand that. Do you have any running experience?",
-                &|response| match response {
+                &|response, _, _| match response {
                     "Yes" => Ok(Ok((State::ScheduleFirstRun, Some("That's great!".into())))),
                     "No" => Ok(Ok((State::ScheduleFirstRun, Some("That's fine, don't worry about it. Let's get you started then.".into())))),
                     _ => Ok(Err(())),
@@ -133,7 +134,7 @@ impl<'a> Dialogue<'a> {
         state_table.insert(
             State::ScheduleFirstRun,
             (
-                &|_| {
+                &|_, _| {
                     let messages = [
                         "When and for how long would you like to go running?",
                         "When do you want to go on your next run, and for how long?",
@@ -142,7 +143,7 @@ impl<'a> Dialogue<'a> {
                     Ok(messages[selected].into())
                 },
                 "Could you repeat when and how long you want your next run to be?",
-                &|response| match response {
+                &|response, _, _| match response {
                     "Tomorrow, 30 minutes" => Ok(Ok((State::AskAboutRun, None))),
                     _ => Ok(Err(())),
                 },
@@ -152,7 +153,7 @@ impl<'a> Dialogue<'a> {
         state_table.insert(
             State::AskAboutRun,
             (
-                &|_| {
+                &|_, _| {
                     let messages = [
                         "Awesome, let me know how it went!",
                         "That's great, tell me how it went!",
@@ -162,7 +163,7 @@ impl<'a> Dialogue<'a> {
                     Ok(messages[selected].into())
                 },
                 "I didn't understand that, please let me know how your run went.",
-                &|response| match response {
+                &|response, _, _| match response {
                     "Good" => Ok(Ok((State::SuggestChange, Some("Very cool!".into())))),
                     "Not great" => Ok(Ok((State::SuggestChange, Some("Don't worry, you'll get there.".into())))),
                     _ => Ok(Err(())),
@@ -173,7 +174,7 @@ impl<'a> Dialogue<'a> {
         state_table.insert(
             State::SuggestChange,
             (
-                &|_| {
+                &|_, _| {
                     let messages = [
                         "How about you try 35 minutes tomorrow?",
                         "Do you want to go for 35 minutes tomorrow?",
@@ -183,7 +184,7 @@ impl<'a> Dialogue<'a> {
                     Ok(messages[selected].into())
                 },
                 "Sorry, I don't get it. Does my suggestion work for you?",
-                &|response| match response {
+                &|response, _, _| match response {
                     "Sure" => Ok(Ok((State::AskAboutRun, None))),
                     "I think I can even do 40 minutes the day after" => {
                         Ok(Ok((State::AskAboutRun, None)))
@@ -197,7 +198,7 @@ impl<'a> Dialogue<'a> {
         state_table.insert(
             State::AskAlternative,
             (
-                &|_| {
+                &|_, _| {
                     let messages = [
                         "Then what do you want to do?",
                         "So what would you prefer?",
@@ -206,7 +207,7 @@ impl<'a> Dialogue<'a> {
                     Ok(messages[selected].into())
                 },
                 "Could you try telling me what you'd like to do instead again?",
-                &|response| match response {
+                &|response, _, _| match response {
                     "Quit" => Ok(Ok((State::Initial, None))),
                     "I think I can even do 40 minutes the day after" => Ok(Ok((State::AskAboutRun, None))),
                     _ => Ok(Err(())),
@@ -228,6 +229,8 @@ impl<'a> Dialogue<'a> {
         &self,
         input: &str,
         previous_state: State,
+        user_id: u64,
+        collection: &Collection,
     ) -> Result<(State, String, Option<String>), mongodb::error::Error> {
         // Get current state, which we know exists (safe to unwrap)
         let current_state = self
@@ -235,13 +238,15 @@ impl<'a> Dialogue<'a> {
             .get(&previous_state)
             .expect("Current state not found");
         // Use transition function to get next state and optional message
-        if let Ok((next_state, transition_msg)) = current_state.2(input)? {
+        if let Ok((next_state, transition_msg)) =
+            current_state.2(input, user_id, collection)?
+        {
             // Get next state's message (again safe to unwrap)
-            let state_msg =
-                self.state_table
-                    .get(&next_state)
-                    .expect("Next state not found")
-                    .0("User ID & collection reference")?;
+            let state_msg = self
+                .state_table
+                .get(&next_state)
+                .expect("Next state not found")
+                .0(user_id, collection)?;
             // Return the transition's and next state's messages
             Ok((next_state, state_msg, transition_msg))
         } else {
@@ -263,10 +268,12 @@ fn select_message(messages: &[&str]) -> usize {
 type StateMap<'a> = HashMap<
     State,
     (
-        &'a dyn Fn(&str) -> Result<String, mongodb::error::Error>,
+        &'a dyn Fn(u64, &Collection) -> Result<String, mongodb::error::Error>,
         &'a str,
         &'a dyn Fn(
             &str,
+            u64,
+            &Collection,
         ) -> Result<
             Result<(State, Option<String>), ()>,
             mongodb::error::Error,

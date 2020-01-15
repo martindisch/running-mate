@@ -96,7 +96,7 @@ async fn handle_message(
     // across threads. A solution could be moving to function pointers instead,
     // which is less elegant but also less problematic.
     let (next_state, state_msg, transition_msg) =
-        dialogue.advance(text, current_state)?;
+        dialogue.advance(text, current_state, user_id, users)?;
 
     debug!("Next state for {}: {:?}", user_id, next_state);
 
