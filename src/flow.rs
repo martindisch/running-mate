@@ -1,5 +1,7 @@
 //! Dialogue flow control.
 
+use bson::{bson, doc, Bson, Document};
+use log::debug;
 use mongodb::Collection;
 use rand::prelude::*;
 use std::collections::HashMap;
@@ -74,12 +76,12 @@ impl<'a> Dialogue<'a> {
         state_table.insert(
             State::CheckName,
             (
-                &|_, _| {
+                &|user_id, users| {
                     let messages = [
                         "Hi there! May I call you XXX?",
                         "Welcome, good to see you! Can I call you XXX?",
                     ];
-                    let selected = select_message(&messages);
+                    let selected = select_message(&messages, user_id, users)?;
                     Ok(messages[selected].into())
                 },
                 "Sorry, I didn't quite catch that. Can I call you XXX?",
@@ -95,12 +97,12 @@ impl<'a> Dialogue<'a> {
         state_table.insert(
             State::RequestName,
             (
-                &|_, _| {
+                &|user_id, users| {
                     let messages = [
                         "Then what can I call you?",
                         "What's your name then?",
                     ];
-                    let selected = select_message(&messages);
+                    let selected = select_message(&messages, user_id, users)?;
                     Ok(messages[selected].into())
                 },
                 "Can you try again?",
@@ -114,12 +116,12 @@ impl<'a> Dialogue<'a> {
         state_table.insert(
             State::DetermineExperience,
             (
-                &|_, _| {
+                &|user_id, users| {
                     let messages = [
                         "Ok, YYY! Do you have any running experience?",
                         "Cool! Did you use to run before?",
                     ];
-                    let selected = select_message(&messages);
+                    let selected = select_message(&messages, user_id, users)?;
                     Ok(messages[selected].into())
                 },
                 "I'm afraid I don't understand that. Do you have any running experience?",
@@ -134,12 +136,12 @@ impl<'a> Dialogue<'a> {
         state_table.insert(
             State::ScheduleFirstRun,
             (
-                &|_, _| {
+                &|user_id, users| {
                     let messages = [
                         "When and for how long would you like to go running?",
                         "When do you want to go on your next run, and for how long?",
                     ];
-                    let selected = select_message(&messages);
+                    let selected = select_message(&messages, user_id, users)?;
                     Ok(messages[selected].into())
                 },
                 "Could you repeat when and how long you want your next run to be?",
@@ -153,13 +155,13 @@ impl<'a> Dialogue<'a> {
         state_table.insert(
             State::AskAboutRun,
             (
-                &|_, _| {
+                &|user_id, users| {
                     let messages = [
                         "Awesome, let me know how it went!",
                         "That's great, tell me how it went!",
                         "Very cool, be sure to tell me about it afterwards!"
                     ];
-                    let selected = select_message(&messages);
+                    let selected = select_message(&messages, user_id, users)?;
                     Ok(messages[selected].into())
                 },
                 "I didn't understand that, please let me know how your run went.",
@@ -174,13 +176,13 @@ impl<'a> Dialogue<'a> {
         state_table.insert(
             State::SuggestChange,
             (
-                &|_, _| {
+                &|user_id, users| {
                     let messages = [
                         "How about you try 35 minutes tomorrow?",
                         "Do you want to go for 35 minutes tomorrow?",
                         "Think you can manage 35 minutes tomorrow?",
                     ];
-                    let selected = select_message(&messages);
+                    let selected = select_message(&messages, user_id, users)?;
                     Ok(messages[selected].into())
                 },
                 "Sorry, I don't get it. Does my suggestion work for you?",
@@ -198,12 +200,12 @@ impl<'a> Dialogue<'a> {
         state_table.insert(
             State::AskAlternative,
             (
-                &|_, _| {
+                &|user_id, users| {
                     let messages = [
                         "Then what do you want to do?",
                         "So what would you prefer?",
                     ];
-                    let selected = select_message(&messages);
+                    let selected = select_message(&messages, user_id, users)?;
                     Ok(messages[selected].into())
                 },
                 "Could you try telling me what you'd like to do instead again?",
@@ -258,9 +260,44 @@ impl<'a> Dialogue<'a> {
 
 /// Checks how often the given messages have been shown and returns the index
 /// of the least frequently used one. Only works for non-empty slices.
-fn select_message(messages: &[&str]) -> usize {
-    // Currently we just do it randomly
-    rand::thread_rng().gen_range(0, messages.len())
+fn select_message(
+    messages: &[&str],
+    user_id: u64,
+    users: &Collection,
+) -> Result<usize, mongodb::error::Error> {
+    debug!("Considering messages {:?}", messages);
+    // Fetch the user's document, which we know exists
+    let mut user_doc =
+        users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
+    // Get (or create) the document containing the frequencies
+    let frequencies_doc = user_doc
+        .entry("frequencies".into())
+        .or_insert(Bson::Document(Document::new()))
+        .as_document_mut()
+        .unwrap();
+    // Build a list of the frequencies, initializing unknown ones with 0
+    let frequencies: Vec<i32> = messages
+        .iter()
+        .map(|&m| frequencies_doc.get_i32(m).unwrap_or(0))
+        .collect();
+    debug!("Current frequencies are {:?}", frequencies);
+    // Determine the minimum
+    let &min = frequencies.iter().min().unwrap();
+    // Get the list of indices of all least frequently used ones
+    let infreq: Vec<usize> = frequencies
+        .into_iter()
+        .enumerate()
+        .filter(|(_, frequency)| frequency == &min)
+        .map(|(i, _frequency)| i)
+        .collect();
+    // Randomly select one if there were multiple
+    let &chosen = infreq.choose(&mut rand::thread_rng()).unwrap();
+    debug!("Chose message with index {}", chosen);
+    // Increment the usage of the chosen message
+    frequencies_doc.insert(messages[chosen], min + 1);
+    users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
+
+    Ok(chosen)
 }
 
 /// Type alias for map of states with their message function, failure message
