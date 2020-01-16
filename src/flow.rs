@@ -55,32 +55,34 @@ impl From<State> for i32 {
 /// The "value" of a state, containing the message and transition function, as
 /// well as the error message.
 #[derive(Clone)]
-struct StateContent<'a> {
-    message:
-        &'a dyn Fn(u64, &Collection) -> Result<String, mongodb::error::Error>,
-    error: &'a str,
+struct StateContent {
+    message: &'static (dyn Fn(u64, &Collection) -> Result<String, mongodb::error::Error>
+                  + Send
+                  + Sync),
+    error: &'static str,
     #[allow(clippy::type_complexity)]
-    transition: &'a dyn Fn(
+    transition: &'static (dyn Fn(
         &str,
         u64,
         &Collection,
     ) -> Result<
         Result<(State, Option<String>), ()>,
         mongodb::error::Error,
-    >,
+    > + Send
+                  + Sync),
 }
 
 /// The state machine for dialogue handling.
 #[derive(Clone)]
-pub struct Dialogue<'a> {
-    state_table: HashMap<State, StateContent<'a>>,
+pub struct Dialogue {
+    state_table: HashMap<State, StateContent>,
     current_state: State,
 }
 
-impl<'a> Dialogue<'a> {
+impl Dialogue {
     /// Initializes a new state machine in a given state.
     pub fn from_state(state: State) -> Self {
-        let mut state_table: HashMap<State, StateContent<'a>> = HashMap::new();
+        let mut state_table: HashMap<State, StateContent> = HashMap::new();
 
         state_table.insert(
             State::Initial,
