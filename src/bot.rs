@@ -5,37 +5,39 @@ use bson::{bson, doc};
 use log::{debug, error, info};
 use mongodb::Collection;
 use serde_json::{json, Value};
+use std::sync::Arc;
 
 use crate::{Dialogue, State};
 
 /// Convenience type for wrapping blocking DB access in async.
-///
-/// At least it used to be, now that we're blocking again it's just the normal
-/// Mongo error.
-type DbError = mongodb::error::Error;
+type DbError = actix_threadpool::BlockingError<mongodb::error::Error>;
 
 /// Deals with the Telegram Bot API, delegating the processing of the message.
 pub async fn handle_webhook(
     update: web::Json<Value>,
     users: web::Data<Collection>,
-    dialogue: web::Data<Dialogue<'_>>,
+    dialogue: web::Data<Dialogue>,
 ) -> HttpResponse {
     if let Ok((chat_id, user_id, user_name, text)) =
         extract_message_data(&update)
     {
         debug!("Received valid request: {}", update);
         // Get our response
-        let response =
-            match handle_message(user_id, user_name, text, &users, &dialogue)
-                .await
-            {
-                Ok(response) => response,
-                Err(msg) => {
-                    error!("Error while responding: {}", msg);
-                    "I encountered an internal error. Sorry about that 😬"
-                        .into()
-                }
-            };
+        let response = match handle_message(
+            user_id,
+            user_name.into(),
+            text.into(),
+            users.into_inner(),
+            dialogue.into_inner(),
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(msg) => {
+                error!("Error while responding: {}", msg);
+                "I encountered an internal error. Sorry about that 😬".into()
+            }
+        };
         // Reply by responding to the original HTTP request
         HttpResponse::Ok().json(json!(
             {"method": "sendMessage", "chat_id": chat_id, "text": response}
@@ -68,48 +70,50 @@ fn extract_message_data(update: &Value) -> Result<(u64, u64, &str, &str), ()> {
 /// Deals with the user message and provides a response.
 async fn handle_message(
     user_id: u64,
-    user_name: &str,
-    text: &str,
-    users: &Collection,
-    dialogue: &Dialogue<'_>,
+    user_name: String,
+    text: String,
+    users: Arc<Collection>,
+    dialogue: Arc<Dialogue>,
 ) -> Result<String, DbError> {
-    // Query user data and add if it doesn't exist yet (yes it's blocking and
-    // bad, but we need it for simpler error handling right now)
-    let current_state: State = if let Some(user_data) =
-        users.find_one(doc! {"user_id": user_id}, None)?
-    {
-        user_data
-            .get_i32("current_state")
-            .unwrap_or_else(|_| State::Initial.into())
-            .into()
-    } else {
-        info!("New user {} with ID {}", user_name, user_id);
-        users.insert_one(doc! {"user_id": user_id}, None)?;
-        State::Initial
-    };
+    // Since the MongoDB driver doesn't offer an async API yet, we have to
+    // manually move operations into a dedicated blocking threadpool. Because
+    // this code has a few DB accesses and the Dialogue it uses does as well,
+    // the Dialogue API was kept blocking and we just run the whole thing
+    // off-thread.
+    actix_threadpool::run(move || {
+        // Query user data and add if it doesn't exist yet
+        let current_state: State = if let Some(user_data) =
+            users.find_one(doc! {"user_id": user_id}, None)?
+        {
+            user_data
+                .get_i32("current_state")
+                .unwrap_or_else(|_| State::Initial.into())
+                .into()
+        } else {
+            info!("New user {} with ID {}", user_name, user_id);
+            users.insert_one(doc! {"user_id": user_id}, None)?;
+            State::Initial
+        };
 
-    debug!("{} currently in state {:?}", user_id, current_state);
+        debug!("{} currently in state {:?}", user_id, current_state);
 
-    // Runs the closures on this thread, which may block on the DB and is bad.
-    // The problem is that async closures aren't a thing yet and we can't do
-    // the spawn_blocking thing, because our closures aren't safely shared
-    // across threads. A solution could be moving to function pointers instead,
-    // which is less elegant but also less problematic.
-    let (next_state, state_msg, transition_msg) =
-        dialogue.advance(text, current_state, user_id, users)?;
+        let (next_state, state_msg, transition_msg) =
+            dialogue.advance(&text, current_state, user_id, &users)?;
 
-    debug!("Next state for {}: {:?}", user_id, next_state);
+        debug!("Next state for {}: {:?}", user_id, next_state);
 
-    // Again, badly blocking to update with next state
-    users.update_one(
-        doc! {"user_id": user_id},
-        doc! {"$set": {"current_state": i32::from(next_state) }},
-        None,
-    )?;
+        // Update data with the next state
+        users.update_one(
+            doc! {"user_id": user_id},
+            doc! {"$set": {"current_state": i32::from(next_state) }},
+            None,
+        )?;
 
-    Ok(if let Some(transition_msg) = transition_msg {
-        format!("{}\n{}", transition_msg, state_msg)
-    } else {
-        state_msg
+        Ok(if let Some(transition_msg) = transition_msg {
+            format!("{}\n{}", transition_msg, state_msg)
+        } else {
+            state_msg
+        })
     })
+    .await
 }
