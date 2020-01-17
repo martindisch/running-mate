@@ -107,6 +107,7 @@ impl Dialogue {
                     let messages: &[&str] = &[
                         &format!("Hi {}, good to see you! Do you have any running experience?", user_name),
                         &format!("Welcome {}, it's great to have you! Did you use to run before?", user_name),
+                        &format!("Hello {}, let's get you started! Did you do much running until now?", user_name),
                     ];
                     let selected = select_message(messages, user_id, users)?;
                     Ok(messages[selected].into())
@@ -116,8 +117,10 @@ impl Dialogue {
                     // TODO: remove unwrap with custom error propagation
                     let api_resp = wit_ai(response, wit).unwrap();
                     match api_resp["entities"]["response"][0]["value"].as_str() {
-                        Some("positive") => Ok(Ok((State::ScheduleFirstRun, Some("That's great!".into())))),
-                        Some("negative") => Ok(Ok((State::ScheduleFirstRun, Some("That's fine, don't worry about it. Let's get you started then.".into())))),
+                        // TODO: revert these to point to the next state
+                        // instead of itself
+                        Some("positive") => Ok(Ok((State::DetermineExperience, Some("Great to hear!".into())))),
+                        Some("negative") => Ok(Ok((State::DetermineExperience, Some("That's fine, don't worry about it.".into())))),
                         _ => Ok(Err(())),
                     }
                 },
