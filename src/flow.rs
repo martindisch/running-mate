@@ -10,8 +10,6 @@ use std::collections::HashMap;
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum State {
     Initial,
-    CheckName,
-    RequestName,
     DetermineExperience,
     ScheduleFirstRun,
     AskAboutRun,
@@ -23,8 +21,6 @@ impl From<i32> for State {
     fn from(id: i32) -> Self {
         match id {
             0 => Self::Initial,
-            10 => Self::CheckName,
-            20 => Self::RequestName,
             30 => Self::DetermineExperience,
             40 => Self::ScheduleFirstRun,
             50 => Self::AskAboutRun,
@@ -41,8 +37,6 @@ impl From<State> for i32 {
     fn from(state: State) -> i32 {
         match state {
             State::Initial => 0,
-            State::CheckName => 10,
-            State::RequestName => 20,
             State::DetermineExperience => 30,
             State::ScheduleFirstRun => 40,
             State::AskAboutRun => 50,
@@ -89,46 +83,8 @@ impl Dialogue {
             StateContent {
                 message: &|_, _| Ok("Sorry to see you go.".into()),
                 error: "You'll never see this error",
-                transition: &|_, _, _| Ok(Ok((State::CheckName, None))),
-            },
-        );
-
-        state_table.insert(
-            State::CheckName,
-            StateContent {
-                message: &|user_id, users| {
-                    let messages = [
-                        "Hi there! May I call you XXX?",
-                        "Welcome, good to see you! Can I call you XXX?",
-                    ];
-                    let selected = select_message(&messages, user_id, users)?;
-                    Ok(messages[selected].into())
-                },
-                error: "Sorry, I didn't quite catch that. Can I call you XXX?",
-                transition: &|response, _, _| match response {
-                    "Sure" => Ok(Ok((State::DetermineExperience, None))),
-                    "No, YYY" => Ok(Ok((State::DetermineExperience, None))),
-                    "No" => Ok(Ok((State::RequestName, None))),
-                    _ => Ok(Err(())),
-                },
-            },
-        );
-
-        state_table.insert(
-            State::RequestName,
-            StateContent {
-                message: &|user_id, users| {
-                    let messages = [
-                        "Then what can I call you?",
-                        "What's your name then?",
-                    ];
-                    let selected = select_message(&messages, user_id, users)?;
-                    Ok(messages[selected].into())
-                },
-                error: "Can you try again?",
-                transition: &|response, _, _| match response {
-                    "YYY" => Ok(Ok((State::DetermineExperience, None))),
-                    _ => Ok(Err(())),
+                transition: &|_, _, _| {
+                    Ok(Ok((State::DetermineExperience, None)))
                 },
             },
         );
@@ -137,11 +93,13 @@ impl Dialogue {
             State::DetermineExperience,
             StateContent {
                 message: &|user_id, users| {
-                    let messages = [
-                        "Ok, YYY! Do you have any running experience?",
-                        "Cool! Did you use to run before?",
+                    let user = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
+                    let user_name = user.get_str("user_name").unwrap();
+                    let messages: &[&str] = &[
+                        &format!("Hi {}, good to see you! Do you have any running experience?", user_name),
+                        &format!("Welcome {}, it's great to have you! Did you use to run before?", user_name),
                     ];
-                    let selected = select_message(&messages, user_id, users)?;
+                    let selected = select_message(messages, user_id, users)?;
                     Ok(messages[selected].into())
                 },
                 error: "I'm afraid I don't understand that. Do you have any running experience?",

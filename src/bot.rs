@@ -91,15 +91,17 @@ async fn handle_message(
                 .into()
         } else {
             info!("New user {} with ID {}", user_name, user_id);
-            users.insert_one(doc! {"user_id": user_id}, None)?;
+            users.insert_one(
+                doc! {"user_id": user_id, "user_name": user_name},
+                None,
+            )?;
             State::Initial
         };
 
         debug!("{} currently in state {:?}", user_id, current_state);
-
+        // Use the state machine to get the next state
         let (next_state, state_msg, transition_msg) =
             dialogue.advance(&text, current_state, user_id, &users)?;
-
         debug!("Next state for {}: {:?}", user_id, next_state);
 
         // Update data with the next state
