@@ -18,6 +18,7 @@ async fn main() -> std::io::Result<()> {
     // The endpoint we're listening on is a secret
     let endpoint = env::var("TELEGRAM_WEBHOOK")
         .expect("Webhook environment variable not set");
+    let wit = env::var("WIT_AI_TOKEN").expect("Wit.ai token not set");
 
     // Connect to DB & get handles to user DB and the books collection
     let client = Client::with_uri_str("mongodb://db:27017/")
@@ -30,6 +31,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .data(collection.clone())
             .data(Dialogue::from_state(State::Initial))
+            .data(wit.to_owned())
             .route(&endpoint, web::post().to(running_mate::handle_webhook))
     })
     .bind("0.0.0.0:8080")?

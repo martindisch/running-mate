@@ -4,6 +4,8 @@ use bson::{bson, doc, Bson, Document};
 use log::debug;
 use mongodb::Collection;
 use rand::prelude::*;
+use reqwest::blocking::Client;
+use serde_json::Value;
 use std::collections::HashMap;
 
 /// The states our dialogue supports.
@@ -50,7 +52,11 @@ impl From<State> for i32 {
 /// well as the error message.
 #[derive(Clone)]
 struct StateContent {
-    message: &'static (dyn Fn(u64, &Collection) -> Result<String, mongodb::error::Error>
+    message: &'static (dyn Fn(
+        u64,
+        &Collection,
+        &str,
+    ) -> Result<String, mongodb::error::Error>
                   + Send
                   + Sync),
     error: &'static str,
@@ -59,6 +65,7 @@ struct StateContent {
         &str,
         u64,
         &Collection,
+        &str,
     ) -> Result<
         Result<(State, Option<String>), ()>,
         mongodb::error::Error,
@@ -81,9 +88,9 @@ impl Dialogue {
         state_table.insert(
             State::Initial,
             StateContent {
-                message: &|_, _| Ok("Sorry to see you go.".into()),
+                message: &|_, _, _| Ok("Sorry to see you go.".into()),
                 error: "You'll never see this error",
-                transition: &|_, _, _| {
+                transition: &|_, _, _, _| {
                     Ok(Ok((State::DetermineExperience, None)))
                 },
             },
@@ -92,7 +99,9 @@ impl Dialogue {
         state_table.insert(
             State::DetermineExperience,
             StateContent {
-                message: &|user_id, users| {
+                message: &|user_id, users, _| {
+                    // Both these unwraps are safe, because we always have a
+                    // user with a name
                     let user = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
                     let user_name = user.get_str("user_name").unwrap();
                     let messages: &[&str] = &[
@@ -103,10 +112,14 @@ impl Dialogue {
                     Ok(messages[selected].into())
                 },
                 error: "I'm afraid I don't understand that. Do you have any running experience?",
-                transition: &|response, _, _| match response {
-                    "Yes" => Ok(Ok((State::ScheduleFirstRun, Some("That's great!".into())))),
-                    "No" => Ok(Ok((State::ScheduleFirstRun, Some("That's fine, don't worry about it. Let's get you started then.".into())))),
-                    _ => Ok(Err(())),
+                transition: &|response, _, _, wit| {
+                    // TODO: remove unwrap with custom error propagation
+                    let api_resp = wit_ai(response, wit).unwrap();
+                    match api_resp["entities"]["response"][0]["value"].as_str() {
+                        Some("positive") => Ok(Ok((State::ScheduleFirstRun, Some("That's great!".into())))),
+                        Some("negative") => Ok(Ok((State::ScheduleFirstRun, Some("That's fine, don't worry about it. Let's get you started then.".into())))),
+                        _ => Ok(Err(())),
+                    }
                 },
             },
         );
@@ -114,7 +127,7 @@ impl Dialogue {
         state_table.insert(
             State::ScheduleFirstRun,
             StateContent {
-                message: &|user_id, users| {
+                message: &|user_id, users, _| {
                     let messages = [
                         "When and for how long would you like to go running?",
                         "When do you want to go on your next run, and for how long?",
@@ -123,7 +136,7 @@ impl Dialogue {
                     Ok(messages[selected].into())
                 },
                 error: "Could you repeat when and how long you want your next run to be?",
-                transition: &|response, _, _| match response {
+                transition: &|response, _, _, _| match response {
                     "Tomorrow, 30 minutes" => Ok(Ok((State::AskAboutRun, None))),
                     _ => Ok(Err(())),
                 },
@@ -133,7 +146,7 @@ impl Dialogue {
         state_table.insert(
             State::AskAboutRun,
             StateContent {
-                message: &|user_id, users| {
+                message: &|user_id, users, _| {
                     let messages = [
                         "Awesome, let me know how it went!",
                         "That's great, tell me how it went!",
@@ -143,7 +156,7 @@ impl Dialogue {
                     Ok(messages[selected].into())
                 },
                 error: "I didn't understand that, please let me know how your run went.",
-                transition: &|response, _, _| match response {
+                transition: &|response, _, _, _| match response {
                     "Good" => Ok(Ok((State::SuggestChange, Some("Very cool!".into())))),
                     "Not great" => Ok(Ok((State::SuggestChange, Some("Don't worry, you'll get there.".into())))),
                     _ => Ok(Err(())),
@@ -154,7 +167,7 @@ impl Dialogue {
         state_table.insert(
             State::SuggestChange,
             StateContent {
-                message: &|user_id, users| {
+                message: &|user_id, users, _| {
                     let messages = [
                         "How about you try 35 minutes tomorrow?",
                         "Do you want to go for 35 minutes tomorrow?",
@@ -165,7 +178,7 @@ impl Dialogue {
                 },
                 error:
                     "Sorry, I don't get it. Does my suggestion work for you?",
-                transition: &|response, _, _| match response {
+                transition: &|response, _, _, _| match response {
                     "Sure" => Ok(Ok((State::AskAboutRun, None))),
                     "I think I can even do 40 minutes the day after" => {
                         Ok(Ok((State::AskAboutRun, None)))
@@ -179,7 +192,7 @@ impl Dialogue {
         state_table.insert(
             State::AskAlternative,
             StateContent {
-                message: &|user_id, users| {
+                message: &|user_id, users, _| {
                     let messages = [
                         "Then what do you want to do?",
                         "So what would you prefer?",
@@ -188,7 +201,7 @@ impl Dialogue {
                     Ok(messages[selected].into())
                 },
                 error: "Could you try telling me what you'd like to do instead again?",
-                transition: &|response, _, _| match response {
+                transition: &|response, _, _, _| match response {
                     "Quit" => Ok(Ok((State::Initial, None))),
                     "I think I can even do 40 minutes the day after" => Ok(Ok((State::AskAboutRun, None))),
                     _ => Ok(Err(())),
@@ -212,6 +225,7 @@ impl Dialogue {
         previous_state: State,
         user_id: u64,
         collection: &Collection,
+        wit: &str,
     ) -> Result<(State, String, Option<String>), mongodb::error::Error> {
         // Get current state, which we know exists (safe to unwrap)
         let current_state = self
@@ -220,14 +234,15 @@ impl Dialogue {
             .expect("Current state not found");
         // Use transition function to get next state and optional message
         if let Ok((next_state, transition_msg)) =
-            (current_state.transition)(input, user_id, collection)?
+            (current_state.transition)(input, user_id, collection, wit)?
         {
             // Get next state's message (again safe to unwrap)
-            let state_msg = (self
-                .state_table
-                .get(&next_state)
-                .expect("Next state not found")
-                .message)(user_id, collection)?;
+            let state_msg =
+                (self
+                    .state_table
+                    .get(&next_state)
+                    .expect("Next state not found")
+                    .message)(user_id, collection, wit)?;
             // Return the transition's and next state's messages
             Ok((next_state, state_msg, transition_msg))
         } else {
@@ -277,4 +292,15 @@ fn select_message(
     users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
 
     Ok(chosen)
+}
+
+/// Makes a blocking request to the API of Wit.ai and returns the JSON
+/// response.
+fn wit_ai(input: &str, token: &str) -> Result<Value, reqwest::Error> {
+    Client::new()
+        .get("https://api.wit.ai/message")
+        .bearer_auth(token)
+        .query(&[("q", input)])
+        .send()?
+        .json()
 }

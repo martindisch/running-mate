@@ -17,6 +17,7 @@ pub async fn handle_webhook(
     update: web::Json<Value>,
     users: web::Data<Collection>,
     dialogue: web::Data<Dialogue>,
+    wit: web::Data<String>,
 ) -> HttpResponse {
     if let Ok((chat_id, user_id, user_name, text)) =
         extract_message_data(&update)
@@ -29,6 +30,7 @@ pub async fn handle_webhook(
             text.into(),
             users.into_inner(),
             dialogue.into_inner(),
+            wit.into_inner(),
         )
         .await
         {
@@ -74,6 +76,7 @@ async fn handle_message(
     text: String,
     users: Arc<Collection>,
     dialogue: Arc<Dialogue>,
+    wit: Arc<String>,
 ) -> Result<String, DbError> {
     // Since the MongoDB driver doesn't offer an async API yet, we have to
     // manually move operations into a dedicated blocking threadpool. Because
@@ -101,7 +104,7 @@ async fn handle_message(
         debug!("{} currently in state {:?}", user_id, current_state);
         // Use the state machine to get the next state
         let (next_state, state_msg, transition_msg) =
-            dialogue.advance(&text, current_state, user_id, &users)?;
+            dialogue.advance(&text, current_state, user_id, &users, &wit)?;
         debug!("Next state for {}: {:?}", user_id, next_state);
 
         // Update data with the next state
