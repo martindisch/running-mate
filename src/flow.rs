@@ -6,7 +6,7 @@ use mongodb::Collection;
 use rand::prelude::*;
 use reqwest::blocking::Client;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::{collections::HashMap, error, fmt};
 
 /// The states our dialogue supports.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
@@ -52,11 +52,7 @@ impl From<State> for i32 {
 /// well as the error message.
 #[derive(Clone)]
 struct StateContent {
-    message: &'static (dyn Fn(
-        u64,
-        &Collection,
-        &str,
-    ) -> Result<String, mongodb::error::Error>
+    message: &'static (dyn Fn(u64, &Collection, &str) -> Result<String, FlowError>
                   + Send
                   + Sync),
     error: &'static str,
@@ -66,10 +62,8 @@ struct StateContent {
         u64,
         &Collection,
         &str,
-    ) -> Result<
-        Result<(State, Option<String>), ()>,
-        mongodb::error::Error,
-    > + Send
+    ) -> Result<(State, Option<String>), FlowError>
+                  + Send
                   + Sync),
 }
 
@@ -91,7 +85,7 @@ impl Dialogue {
                 message: &|_, _, _| Ok("Sorry to see you go.".into()),
                 error: "You'll never see this error",
                 transition: &|_, _, _, _| {
-                    Ok(Ok((State::DetermineExperience, None)))
+                    Ok((State::DetermineExperience, None))
                 },
             },
         );
@@ -114,14 +108,13 @@ impl Dialogue {
                 },
                 error: "I'm afraid I don't understand that. Do you have any running experience?",
                 transition: &|response, _, _, wit| {
-                    // TODO: remove unwrap with custom error propagation
-                    let api_resp = wit_ai(response, wit).unwrap();
+                    let api_resp = wit_ai(response, wit)?;
                     match api_resp["entities"]["response"][0]["value"].as_str() {
                         // TODO: revert these to point to the next state
                         // instead of itself
-                        Some("positive") => Ok(Ok((State::DetermineExperience, Some("Great to hear!".into())))),
-                        Some("negative") => Ok(Ok((State::DetermineExperience, Some("That's fine, don't worry about it.".into())))),
-                        _ => Ok(Err(())),
+                        Some("positive") => Ok((State::DetermineExperience, Some("Great to hear!".into()))),
+                        Some("negative") => Ok((State::DetermineExperience, Some("That's fine, don't worry about it.".into()))),
+                        _ => Err(FlowError::NoMatch),
                     }
                 },
             },
@@ -140,8 +133,8 @@ impl Dialogue {
                 },
                 error: "Could you repeat when and how long you want your next run to be?",
                 transition: &|response, _, _, _| match response {
-                    "Tomorrow, 30 minutes" => Ok(Ok((State::AskAboutRun, None))),
-                    _ => Ok(Err(())),
+                    "Tomorrow, 30 minutes" => Ok((State::AskAboutRun, None)),
+                    _ => Err(FlowError::NoMatch),
                 },
             },
         );
@@ -160,9 +153,9 @@ impl Dialogue {
                 },
                 error: "I didn't understand that, please let me know how your run went.",
                 transition: &|response, _, _, _| match response {
-                    "Good" => Ok(Ok((State::SuggestChange, Some("Very cool!".into())))),
-                    "Not great" => Ok(Ok((State::SuggestChange, Some("Don't worry, you'll get there.".into())))),
-                    _ => Ok(Err(())),
+                    "Good" => Ok((State::SuggestChange, Some("Very cool!".into()))),
+                    "Not great" => Ok((State::SuggestChange, Some("Don't worry, you'll get there.".into()))),
+                    _ => Err(FlowError::NoMatch),
                 },
             },
         );
@@ -182,12 +175,12 @@ impl Dialogue {
                 error:
                     "Sorry, I don't get it. Does my suggestion work for you?",
                 transition: &|response, _, _, _| match response {
-                    "Sure" => Ok(Ok((State::AskAboutRun, None))),
+                    "Sure" => Ok((State::AskAboutRun, None)),
                     "I think I can even do 40 minutes the day after" => {
-                        Ok(Ok((State::AskAboutRun, None)))
+                        Ok((State::AskAboutRun, None))
                     }
-                    "No" => Ok(Ok((State::AskAlternative, None))),
-                    _ => Ok(Err(())),
+                    "No" => Ok((State::AskAlternative, None)),
+                    _ => Err(FlowError::NoMatch),
                 },
             },
         );
@@ -205,9 +198,9 @@ impl Dialogue {
                 },
                 error: "Could you try telling me what you'd like to do instead again?",
                 transition: &|response, _, _, _| match response {
-                    "Quit" => Ok(Ok((State::Initial, None))),
-                    "I think I can even do 40 minutes the day after" => Ok(Ok((State::AskAboutRun, None))),
-                    _ => Ok(Err(())),
+                    "Quit" => Ok((State::Initial, None)),
+                    "I think I can even do 40 minutes the day after" => Ok((State::AskAboutRun, None)),
+                    _ => Err(FlowError::NoMatch),
                 },
             },
         );
@@ -229,28 +222,32 @@ impl Dialogue {
         user_id: u64,
         collection: &Collection,
         wit: &str,
-    ) -> Result<(State, String, Option<String>), mongodb::error::Error> {
+    ) -> Result<(State, String, Option<String>), FlowError> {
         // Get current state, which we know exists (safe to unwrap)
         let current_state = self
             .state_table
             .get(&previous_state)
             .expect("Current state not found");
         // Use transition function to get next state and optional message
-        if let Ok((next_state, transition_msg)) =
-            (current_state.transition)(input, user_id, collection, wit)?
-        {
-            // Get next state's message (again safe to unwrap)
-            let state_msg =
-                (self
+        match (current_state.transition)(input, user_id, collection, wit) {
+            Ok((next_state, transition_msg)) => {
+                // Get next state's message (again safe to unwrap)
+                let state_msg = (self
                     .state_table
                     .get(&next_state)
                     .expect("Next state not found")
-                    .message)(user_id, collection, wit)?;
-            // Return the transition's and next state's messages
-            Ok((next_state, state_msg, transition_msg))
-        } else {
-            // Return just the state's error message
-            Ok((previous_state, current_state.error.into(), None))
+                    .message)(
+                    user_id, collection, wit
+                )?;
+                // Return the transition's and next state's messages
+                Ok((next_state, state_msg, transition_msg))
+            }
+            Err(FlowError::NoMatch) => {
+                // Return just the state's error message
+                Ok((previous_state, current_state.error.into(), None))
+            }
+            // Otherwise (MongoDB or reqwest error), just pass it on
+            Err(e) => Err(e),
         }
     }
 }
@@ -307,3 +304,38 @@ fn wit_ai(input: &str, token: &str) -> Result<Value, reqwest::Error> {
         .send()?
         .json()
 }
+
+/// The error returned from state and transition functions.
+#[derive(Debug)]
+pub enum FlowError {
+    /// Error related to MongoDB.
+    Database(mongodb::error::Error),
+    /// Error related to Wit.ai request.
+    Wit(reqwest::Error),
+    /// Unable to determine user intent.
+    NoMatch,
+}
+
+impl From<mongodb::error::Error> for FlowError {
+    fn from(e: mongodb::error::Error) -> Self {
+        Self::Database(e)
+    }
+}
+
+impl From<reqwest::Error> for FlowError {
+    fn from(e: reqwest::Error) -> Self {
+        Self::Wit(e)
+    }
+}
+
+impl fmt::Display for FlowError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Database(e) => e.fmt(f),
+            Self::Wit(e) => e.fmt(f),
+            Self::NoMatch => write!(f, "No match found for user input"),
+        }
+    }
+}
+
+impl error::Error for FlowError {}

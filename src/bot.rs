@@ -7,10 +7,10 @@ use mongodb::Collection;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::{Dialogue, State};
+use crate::{Dialogue, FlowError, State};
 
-/// Convenience type for wrapping blocking DB access in async.
-type DbError = actix_threadpool::BlockingError<mongodb::error::Error>;
+/// Convenience type for wrapping blocking operations in async.
+type AdvanceError = actix_threadpool::BlockingError<FlowError>;
 
 /// Deals with the Telegram Bot API, delegating the processing of the message.
 pub async fn handle_webhook(
@@ -77,7 +77,7 @@ async fn handle_message(
     users: Arc<Collection>,
     dialogue: Arc<Dialogue>,
     wit: Arc<String>,
-) -> Result<String, DbError> {
+) -> Result<String, AdvanceError> {
     // Since the MongoDB driver doesn't offer an async API yet, we have to
     // manually move operations into a dedicated blocking threadpool. Because
     // this code has a few DB accesses and the Dialogue it uses does as well,
