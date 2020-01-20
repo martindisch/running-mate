@@ -146,7 +146,7 @@ impl Dialogue {
                             // Store update
                             users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
                             debug!("{} committed to {} minutes on {}", user_id, duration.num_minutes(), date.format("%Y-%m-%d"));
-                            Ok((State::ScheduleFirstRun, None))
+                            Ok((State::AskAboutRun, None))
                         },
                         _ => {
                             Err(FlowError::NoMatch)
@@ -161,16 +161,35 @@ impl Dialogue {
             StateContent {
                 message: &|user_id, users, _| {
                     select_message(&[
-                        "Awesome, let me know how it went!",
-                        "That's great, tell me how it went!",
+                        "Awesome, let me know how it went as soon as you're back!",
+                        "That's great, tell me how it went when you're done!",
                         "Very cool, be sure to tell me about it afterwards!"
                     ], user_id, users)
                 },
                 error: "I didn't understand that, please let me know how your run went.",
-                transition: &|response, _, _, _| match response {
-                    "Good" => Ok((State::SuggestChange, Some("Very cool!".into()))),
-                    "Not great" => Ok((State::SuggestChange, Some("Don't worry, you'll get there.".into()))),
-                    _ => Err(FlowError::NoMatch),
+                transition: &|response, user_id, users, wit| {
+                    // Fetch the user's document, which we know exists
+                    let mut user_doc = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
+                    let user_name = user_doc.get_str("user_name").unwrap();
+                    let api_resp = wit_ai(response, wit)?;
+                    // Abort early if no sentiment was detected
+                    let sentiment = api_resp["entities"]["sentiment"][0]["value"].as_str();
+                    if sentiment.is_none() {
+                        return Err(FlowError::NoMatch);
+                    }
+                    // Otherwise, determine the response
+                    let sentiment = sentiment.unwrap();
+                    let response = match sentiment {
+                        "positive" => format!("Awesome work, {}!", user_name),
+                        "neutral" => format!("That's pretty good, {}. Keep it up!", user_name),
+                        "negative" => format!("Don't worry, {}. That happens, you just have to keep at it.", user_name),
+                        _ => unreachable!(),
+                    };
+                    // and store the experience
+                    user_doc.insert("last_experience", sentiment);
+                    users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
+
+                    Ok((State::SuggestChange, Some(response)))
                 },
             },
         );
