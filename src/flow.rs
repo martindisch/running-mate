@@ -180,11 +180,20 @@ impl Dialogue {
                     // Otherwise, determine the response
                     let sentiment = sentiment.unwrap();
                     let response = match sentiment {
-                        "positive" => format!("Awesome work, {}!", user_name),
-                        "neutral" => "That's pretty good. Keep it up!".into(),
-                        "negative" => "Don't worry, that happens. You just have to keep at it.".into(),
+                        "positive" => select_message(&[
+                            &format!("Awesome work, {}!", user_name),
+                            "Amazing!",
+                        ], user_id, users),
+                        "neutral" => select_message(&[
+                            &format!("That's pretty good, keep it up, {}.", user_name),
+                            "Nice!",
+                        ], user_id, users),
+                        "negative" => select_message(&[
+                            &format!("No worries {}, you'll get there.", user_name),
+                            "Never mind that, just keep trying.",
+                        ], user_id, users),
                         _ => unreachable!(),
-                    };
+                    }?;
                     // and store the experience
                     user_doc.insert("last_experience", sentiment);
                     users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
