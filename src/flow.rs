@@ -53,7 +53,7 @@ impl From<State> for i32 {
 /// well as the error message.
 #[derive(Clone)]
 struct StateContent {
-    message: &'static (dyn Fn(u64, &Collection, &str) -> Result<String, FlowError>
+    message: &'static (dyn Fn(u64, &Collection) -> Result<String, FlowError>
                   + Send
                   + Sync),
     error: &'static str,
@@ -83,7 +83,7 @@ impl Dialogue {
         state_table.insert(
             State::Initial,
             StateContent {
-                message: &|_, _, _| Ok("Sorry to see you go.".into()),
+                message: &|_, _| Ok("Sorry to see you go.".into()),
                 error: "You'll never see this error",
                 transition: &|_, _, _, _| {
                     Ok((State::DetermineExperience, None))
@@ -94,7 +94,7 @@ impl Dialogue {
         state_table.insert(
             State::DetermineExperience,
             StateContent {
-                message: &|user_id, users, _| {
+                message: &|user_id, users| {
                     // Both these unwraps are safe, because we always have a
                     // user with a name
                     let user = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
@@ -121,7 +121,7 @@ impl Dialogue {
         state_table.insert(
             State::ScheduleFirstRun,
             StateContent {
-                message: &|user_id, users, _| {
+                message: &|user_id, users| {
                     select_message(&[
                         "When and for how long would you like to go running?",
                         "When do you want to go on your next run, and for how long?",
@@ -159,7 +159,7 @@ impl Dialogue {
         state_table.insert(
             State::AskAboutRun,
             StateContent {
-                message: &|user_id, users, _| {
+                message: &|user_id, users| {
                     select_message(&[
                         "Awesome, let me know how it went as soon as you're back!",
                         "That's great, tell me how it went when you're done!",
@@ -197,7 +197,7 @@ impl Dialogue {
         state_table.insert(
             State::SuggestChange,
             StateContent {
-                message: &|user_id, users, _| {
+                message: &|user_id, users| {
                     select_message(
                         &[
                             "How about you try 35 minutes tomorrow?",
@@ -224,7 +224,7 @@ impl Dialogue {
         state_table.insert(
             State::AskAlternative,
             StateContent {
-                message: &|user_id, users, _| {
+                message: &|user_id, users| {
                     select_message(&[
                         "Then what do you want to do?",
                         "So what would you prefer?",
@@ -266,13 +266,12 @@ impl Dialogue {
         match (current_state.transition)(input, user_id, collection, wit) {
             Ok((next_state, transition_msg)) => {
                 // Get next state's message (again safe to unwrap)
-                let state_msg = (self
-                    .state_table
-                    .get(&next_state)
-                    .expect("Next state not found")
-                    .message)(
-                    user_id, collection, wit
-                )?;
+                let state_msg =
+                    (self
+                        .state_table
+                        .get(&next_state)
+                        .expect("Next state not found")
+                        .message)(user_id, collection)?;
                 // Return the transition's and next state's messages
                 Ok((next_state, state_msg, transition_msg))
             }
