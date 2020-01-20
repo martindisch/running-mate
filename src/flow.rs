@@ -103,8 +103,7 @@ impl Dialogue {
                         &format!("Welcome {}, it's great to have you! Did you use to run before?", user_name),
                         &format!("Hello {}, let's get you started! Did you do much running until now?", user_name),
                     ];
-                    let selected = select_message(messages, user_id, users)?;
-                    Ok(messages[selected].into())
+                    select_message(messages, user_id, users)
                 },
                 error: "I'm afraid I don't understand that. Do you have any running experience?",
                 transition: &|response, _, _, wit| {
@@ -124,12 +123,10 @@ impl Dialogue {
             State::ScheduleFirstRun,
             StateContent {
                 message: &|user_id, users, _| {
-                    let messages = [
+                    select_message(&[
                         "When and for how long would you like to go running?",
                         "When do you want to go on your next run, and for how long?",
-                    ];
-                    let selected = select_message(&messages, user_id, users)?;
-                    Ok(messages[selected].into())
+                    ], user_id, users)
                 },
                 error: "Could you repeat when and how long you want your next run to be?",
                 transition: &|response, _, _, _| match response {
@@ -143,13 +140,11 @@ impl Dialogue {
             State::AskAboutRun,
             StateContent {
                 message: &|user_id, users, _| {
-                    let messages = [
+                    select_message(&[
                         "Awesome, let me know how it went!",
                         "That's great, tell me how it went!",
                         "Very cool, be sure to tell me about it afterwards!"
-                    ];
-                    let selected = select_message(&messages, user_id, users)?;
-                    Ok(messages[selected].into())
+                    ], user_id, users)
                 },
                 error: "I didn't understand that, please let me know how your run went.",
                 transition: &|response, _, _, _| match response {
@@ -164,13 +159,15 @@ impl Dialogue {
             State::SuggestChange,
             StateContent {
                 message: &|user_id, users, _| {
-                    let messages = [
-                        "How about you try 35 minutes tomorrow?",
-                        "Do you want to go for 35 minutes tomorrow?",
-                        "Think you can manage 35 minutes tomorrow?",
-                    ];
-                    let selected = select_message(&messages, user_id, users)?;
-                    Ok(messages[selected].into())
+                    select_message(
+                        &[
+                            "How about you try 35 minutes tomorrow?",
+                            "Do you want to go for 35 minutes tomorrow?",
+                            "Think you can manage 35 minutes tomorrow?",
+                        ],
+                        user_id,
+                        users,
+                    )
                 },
                 error:
                     "Sorry, I don't get it. Does my suggestion work for you?",
@@ -189,12 +186,10 @@ impl Dialogue {
             State::AskAlternative,
             StateContent {
                 message: &|user_id, users, _| {
-                    let messages = [
+                    select_message(&[
                         "Then what do you want to do?",
                         "So what would you prefer?",
-                    ];
-                    let selected = select_message(&messages, user_id, users)?;
-                    Ok(messages[selected].into())
+                    ], user_id, users)
                 },
                 error: "Could you try telling me what you'd like to do instead again?",
                 transition: &|response, _, _, _| match response {
@@ -258,7 +253,7 @@ fn select_message(
     messages: &[&str],
     user_id: u64,
     users: &Collection,
-) -> Result<usize, mongodb::error::Error> {
+) -> Result<String, FlowError> {
     debug!("Considering messages {:?}", messages);
     // Fetch the user's document, which we know exists
     let mut user_doc =
@@ -291,7 +286,7 @@ fn select_message(
     frequencies_doc.insert(messages[chosen], min + 1);
     users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
 
-    Ok(chosen)
+    Ok(messages[chosen].into())
 }
 
 /// Makes a blocking request to the API of Wit.ai and returns the JSON
