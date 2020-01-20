@@ -142,7 +142,7 @@ impl Dialogue {
                             let mut user_doc = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
                             // Insert the values we want to remember
                             user_doc.insert("planned_date", date.to_string());
-                            user_doc.insert("planned_duration", duration.to_string());
+                            user_doc.insert("planned_duration", duration.num_seconds());
                             // Store update
                             users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
                             debug!("{} committed to {} minutes on {}", user_id, duration.num_minutes(), date.format("%Y-%m-%d"));
@@ -181,8 +181,8 @@ impl Dialogue {
                     let sentiment = sentiment.unwrap();
                     let response = match sentiment {
                         "positive" => format!("Awesome work, {}!", user_name),
-                        "neutral" => format!("That's pretty good, {}. Keep it up!", user_name),
-                        "negative" => format!("Don't worry, {}. That happens, you just have to keep at it.", user_name),
+                        "neutral" => "That's pretty good. Keep it up!".into(),
+                        "negative" => "Don't worry, that happens. You just have to keep at it.".into(),
                         _ => unreachable!(),
                     };
                     // and store the experience
@@ -198,25 +198,84 @@ impl Dialogue {
             State::SuggestChange,
             StateContent {
                 message: &|user_id, users| {
-                    select_message(
-                        &[
-                            "How about you try 35 minutes tomorrow?",
-                            "Do you want to go for 35 minutes tomorrow?",
-                            "Think you can manage 35 minutes tomorrow?",
-                        ],
-                        user_id,
-                        users,
-                    )
+                    // Fetch the user's document and the experience, which we
+                    // know exist
+                    let user_doc = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
+                    let experience = user_doc.get_str("last_experience").unwrap();
+                    let mut duration = Duration::seconds(user_doc.get_i64("planned_duration").unwrap());
+                    let mut date = Utc::now();
+                    let response = match experience {
+                        "positive" => {
+                            // If it went well, take a day and add 5 minutes
+                            duration = duration + Duration::minutes(5);
+                            date = date + Duration::days(2);
+                            select_message(&[
+                                &format!("Since it went so well, why don't you take a break and try {} minutes the day after tomorrow?", duration.num_minutes()),
+                                &format!("It looks like you can even try {} minutes in two days, what do you think?", duration.num_minutes()),
+                            ], user_id, users)
+                        },
+                        "neutral" => {
+                            // If it was ok, take a day and keep the duration
+                            date = date + Duration::days(2);
+                            select_message(&[
+                                &format!("{} minutes seems to be a good time for you right now, how about you go again in two days?", duration.num_minutes()),
+                                &format!("It's going well for you, do you want to do {} minutes again the day after tomorrow?", duration.num_minutes()),
+                            ], user_id, users)
+                        },
+                        "negative" => {
+                            // If it went badly, try 5 minutes less tomorrow
+                            duration = duration - Duration::minutes(5);
+                            date = date + Duration::days(1);
+                            select_message(&[
+                                &format!("It's probably best to go again tomorrow, but only for {} minutes. Is that ok?", duration.num_minutes()),
+                                &format!("Why don't you reduce the duration to {} minutes, but try again tomorrow?", duration.num_minutes()),
+                            ], user_id, users)
+                        },
+                        _ => unreachable!(),
+                    };
+
+                    // Read the user data again, just to be sure (since we
+                    // change it in select_message)
+                    let mut user_doc = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
+                    // Insert the values we want to remember
+                    user_doc.insert("planned_date", date.to_string());
+                    user_doc.insert("planned_duration", duration.num_seconds());
+                    users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
+                    debug!("Suggested {} for {} minutes to {}", date.format("%Y-%m-%d"), duration.num_minutes(), user_id);
+
+                    response
                 },
                 error:
                     "Sorry, I don't get it. Does my suggestion work for you?",
-                transition: &|response, _, _, _| match response {
-                    "Sure" => Ok((State::AskAboutRun, None)),
-                    "I think I can even do 40 minutes the day after" => {
-                        Ok((State::AskAboutRun, None))
+                transition: &|response, user_id, users, wit| {
+                    let api_resp = wit_ai(response, wit)?;
+                    match (
+                        api_resp["entities"]["datetime"][0]["value"].as_str(),
+                        api_resp["entities"]["duration"][0]["normalized"]["value"].as_i64(),
+                        api_resp["entities"]["response"][0]["value"].as_str(),
+                    ) {
+                        // This is the case where the user makes another
+                        // proposal
+                        (Some(date), Some(seconds), _) => {
+                            // Parse date and duration
+                            let date = DateTime::parse_from_rfc3339(date)?;
+                            let duration = Duration::seconds(seconds);
+                            // Fetch the user's document, which we know exists
+                            let mut user_doc = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
+                            // Insert the values we want to remember
+                            user_doc.insert("planned_date", date.to_string());
+                            user_doc.insert("planned_duration", duration.num_seconds());
+                            // Store update
+                            users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
+                            debug!("{} committed to {} minutes on {}", user_id, duration.num_minutes(), date.format("%Y-%m-%d"));
+                            Ok((State::AskAboutRun, None))
+                        },
+                        // User agrees
+                        (_, _, Some("positive")) => Ok((State::AskAboutRun, None)),
+                        // User disagrees without alternative
+                        (_, _, Some("negative")) => Ok((State::AskAlternative, None)),
+                        _ => Err(FlowError::NoMatch)
                     }
-                    "No" => Ok((State::AskAlternative, None)),
-                    _ => Err(FlowError::NoMatch),
                 },
             },
         );
