@@ -1,6 +1,7 @@
 //! Dialogue flow control.
 
 use bson::{bson, doc, Bson, Document};
+use chrono::{prelude::*, Duration};
 use log::debug;
 use mongodb::Collection;
 use rand::prelude::*;
@@ -109,10 +110,8 @@ impl Dialogue {
                 transition: &|response, _, _, wit| {
                     let api_resp = wit_ai(response, wit)?;
                     match api_resp["entities"]["response"][0]["value"].as_str() {
-                        // TODO: revert these to point to the next state
-                        // instead of itself
-                        Some("positive") => Ok((State::DetermineExperience, Some("Great to hear!".into()))),
-                        Some("negative") => Ok((State::DetermineExperience, Some("That's fine, don't worry about it.".into()))),
+                        Some("positive") => Ok((State::ScheduleFirstRun, Some("Great to hear!".into()))),
+                        Some("negative") => Ok((State::ScheduleFirstRun, Some("That's fine, don't worry about it.".into()))),
                         _ => Err(FlowError::NoMatch),
                     }
                 },
@@ -128,10 +127,31 @@ impl Dialogue {
                         "When do you want to go on your next run, and for how long?",
                     ], user_id, users)
                 },
-                error: "Could you repeat when and how long you want your next run to be?",
-                transition: &|response, _, _, _| match response {
-                    "Tomorrow, 30 minutes" => Ok((State::AskAboutRun, None)),
-                    _ => Err(FlowError::NoMatch),
+                error: "I sometimes have trouble distinguishing the duration and the date. Could you try again in a different way?",
+                transition: &|response, user_id, users, wit| {
+                    let api_resp = wit_ai(response, wit)?;
+                    match (
+                        api_resp["entities"]["datetime"][0]["value"].as_str(),
+                        api_resp["entities"]["duration"][0]["normalized"]["value"].as_i64()
+                    ) {
+                        (Some(date), Some(seconds)) => {
+                            // Parse date and duration
+                            let date = DateTime::parse_from_rfc3339(date)?;
+                            let duration = Duration::seconds(seconds);
+                            // Fetch the user's document, which we know exists
+                            let mut user_doc = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
+                            // Insert the values we want to remember
+                            user_doc.insert("planned_date", date.to_string());
+                            user_doc.insert("planned_duration", duration.to_string());
+                            // Store update
+                            users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
+                            debug!("{} committed to {} minutes on {}", user_id, duration.num_minutes(), date.format("%Y-%m-%d"));
+                            Ok((State::ScheduleFirstRun, None))
+                        },
+                        _ => {
+                            Err(FlowError::NoMatch)
+                        }
+                    }
                 },
             },
         );
@@ -307,6 +327,8 @@ pub enum FlowError {
     Database(mongodb::error::Error),
     /// Error related to Wit.ai request.
     Wit(reqwest::Error),
+    /// Error related to date/time parsing.
+    Time(chrono::ParseError),
     /// Unable to determine user intent.
     NoMatch,
 }
@@ -323,11 +345,18 @@ impl From<reqwest::Error> for FlowError {
     }
 }
 
+impl From<chrono::ParseError> for FlowError {
+    fn from(e: chrono::ParseError) -> Self {
+        Self::Time(e)
+    }
+}
+
 impl fmt::Display for FlowError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Database(e) => e.fmt(f),
             Self::Wit(e) => e.fmt(f),
+            Self::Time(e) => e.fmt(f),
             Self::NoMatch => write!(f, "No match found for user input"),
         }
     }
