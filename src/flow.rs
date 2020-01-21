@@ -123,8 +123,9 @@ impl Dialogue {
             StateContent {
                 message: &|user_id, users| {
                     select_message(&[
-                        "When and for how long would you like to go running?",
-                        "When do you want to go on your next run, and for how long?",
+                        "Let's plan your next run. When and for how long would you like to go?",
+                        "Alright then, when do you want to go on your next run, and for how long?",
+                        "For your next run, when and for how long would be good for you?",
                     ], user_id, users)
                 },
                 error: "I sometimes have trouble distinguishing the duration and the date. Could you try again in a different way?",
