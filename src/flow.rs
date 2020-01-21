@@ -299,10 +299,37 @@ impl Dialogue {
                     ], user_id, users)
                 },
                 error: "Could you try telling me what you'd like to do instead again?",
-                transition: &|response, _, _, _| match response {
-                    "Quit" => Ok((State::Initial, None)),
-                    "I think I can even do 40 minutes the day after" => Ok((State::AskAboutRun, None)),
-                    _ => Err(FlowError::NoMatch),
+                transition: &|response, user_id, users, wit| {
+                    let api_resp = wit_ai(response, wit)?;
+                    match (
+                        api_resp["entities"]["datetime"][0]["value"].as_str(),
+                        api_resp["entities"]["duration"][0]["normalized"]["value"].as_i64(),
+                        api_resp["entities"]["intent"][0]["value"].as_str(),
+                    ) {
+                        // This is the case where the user makes another
+                        // proposal
+                        (Some(date), Some(seconds), _) => {
+                            // Parse date and duration
+                            let date = DateTime::parse_from_rfc3339(date)?;
+                            let duration = Duration::seconds(seconds);
+                            // Fetch the user's document, which we know exists
+                            let mut user_doc = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
+                            // Insert the values we want to remember
+                            user_doc.insert("planned_date", date.to_string());
+                            user_doc.insert("planned_duration", duration.num_seconds());
+                            // Store update
+                            users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
+                            debug!("{} committed to {} minutes on {}", user_id, duration.num_minutes(), date.format("%Y-%m-%d"));
+                            Ok((State::AskAboutRun, None))
+                        },
+                        // User wants to quit
+                        (_, _, Some("quit")) => {
+                            // Delete user record
+                            users.delete_one(doc! {"user_id": user_id}, None)?;
+                            Ok((State::Initial, None))
+                        },
+                        _ => Err(FlowError::NoMatch)
+                    }
                 },
             },
         );
