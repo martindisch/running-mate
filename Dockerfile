@@ -16,6 +16,7 @@ RUN sleep 1 && touch src/main.rs && cargo build --release
 
 # Final image -----------------------------------------------------------------
 FROM debian:9-slim
+ENV RUST_BACKTRACE=1
 RUN apt-get update && apt-get -y install openssl ca-certificates
 COPY --from=builder \
   /usr/src/running-mate/target/release/running-mate \
