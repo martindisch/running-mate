@@ -18,6 +18,7 @@ async fn main() -> std::io::Result<()> {
     // The endpoint we're listening on is a secret
     let endpoint = env::var("TELEGRAM_WEBHOOK")
         .expect("Webhook environment variable not set");
+    let token = env::var("TELEGRAM_TOKEN").expect("Bot token not set");
     let wit = env::var("WIT_AI_TOKEN").expect("Wit.ai token not set");
 
     // Connect to DB & get handles to user DB and the books collection
@@ -25,6 +26,9 @@ async fn main() -> std::io::Result<()> {
         .expect("Unable to connect to MongoDB");
     let db = client.database("running-mate");
     let collection = db.collection("users");
+
+    // Spawn the reminder task
+    actix_rt::spawn(running_mate::remind(collection.clone(), token));
 
     // Start server listening for webhook requests
     HttpServer::new(move || {

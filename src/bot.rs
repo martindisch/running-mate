@@ -4,6 +4,7 @@ use actix_web::{web, HttpResponse};
 use bson::{bson, doc};
 use log::{debug, error, info};
 use mongodb::Collection;
+use reqwest::{Client, Error, Response};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -127,4 +128,20 @@ async fn handle_message(
         })
     })
     .await
+}
+
+/// Sends a single message to the given chat and returns the result.
+pub async fn send_message(
+    chat_id: i64,
+    text: &str,
+    token: &str,
+) -> Result<Response, Error> {
+    Client::new()
+        .post(&format!(
+            "https://api.telegram.org/bot{}/sendMessage",
+            token
+        ))
+        .json(&json!({"chat_id": chat_id, "text": text}))
+        .send()
+        .await
 }
