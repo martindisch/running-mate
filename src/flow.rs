@@ -142,7 +142,7 @@ impl Dialogue {
                             // Fetch the user's document, which we know exists
                             let mut user_doc = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
                             // Insert the values we want to remember
-                            user_doc.insert("planned_date", date.to_string());
+                            user_doc.insert("planned_date", date.to_rfc3339());
                             user_doc.insert("planned_duration", duration.num_seconds());
                             // Store update
                             users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
@@ -248,7 +248,7 @@ impl Dialogue {
                     // change it in select_message)
                     let mut user_doc = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
                     // Insert the values we want to remember
-                    user_doc.insert("planned_date", date.to_string());
+                    user_doc.insert("planned_date", date.to_rfc3339());
                     user_doc.insert("planned_duration", duration.num_seconds());
                     users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
                     debug!("Suggested {} for {} minutes to {}", date.format("%Y-%m-%d"), duration.num_minutes(), user_id);
@@ -273,7 +273,7 @@ impl Dialogue {
                             // Fetch the user's document, which we know exists
                             let mut user_doc = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
                             // Insert the values we want to remember
-                            user_doc.insert("planned_date", date.to_string());
+                            user_doc.insert("planned_date", date.to_rfc3339());
                             user_doc.insert("planned_duration", duration.num_seconds());
                             // Store update
                             users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
@@ -316,7 +316,7 @@ impl Dialogue {
                             // Fetch the user's document, which we know exists
                             let mut user_doc = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
                             // Insert the values we want to remember
-                            user_doc.insert("planned_date", date.to_string());
+                            user_doc.insert("planned_date", date.to_rfc3339());
                             user_doc.insert("planned_duration", duration.num_seconds());
                             // Store update
                             users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
