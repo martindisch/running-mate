@@ -26,6 +26,7 @@ pub async fn handle_webhook(
         // Get our response
         let response = match handle_message(
             user_id,
+            chat_id,
             user_name.into(),
             text.into(),
             users.into_inner(),
@@ -72,6 +73,7 @@ fn extract_message_data(update: &Value) -> Result<(u64, u64, &str, &str), ()> {
 /// Deals with the user message and provides a response.
 async fn handle_message(
     user_id: u64,
+    chat_id: u64,
     user_name: String,
     text: String,
     users: Arc<Collection>,
@@ -95,7 +97,11 @@ async fn handle_message(
         } else {
             info!("New user {} with ID {}", user_name, user_id);
             users.insert_one(
-                doc! {"user_id": user_id, "user_name": user_name},
+                doc! {
+                    "user_id": user_id,
+                    "user_name": user_name,
+                    "chat_id": chat_id
+                },
                 None,
             )?;
             State::Initial
