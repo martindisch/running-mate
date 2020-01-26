@@ -189,7 +189,7 @@ impl Dialogue {
                 error: "I didn't understand that, please let me know how your run went.",
                 transition: &|response, user_id, users, wit| {
                     // Fetch the user's document, which we know exists
-                    let mut user_doc = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
+                    let user_doc = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
                     let user_name = user_doc.get_str("user_name").unwrap();
                     let api_resp = wit_ai(response, wit)?;
                     // Abort early if no sentiment was detected
@@ -215,8 +215,7 @@ impl Dialogue {
                         _ => unreachable!(),
                     }?;
                     // and store the experience
-                    user_doc.insert("last_experience", sentiment);
-                    users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
+                    users.update_one(doc! {"user_id": user_id}, doc! {"$set": {"last_experience": sentiment }}, None)?;
 
                     Ok((State::SuggestChange, Some(response)))
                 },
