@@ -5,6 +5,7 @@ use bson::{bson, doc};
 use chrono::prelude::*;
 use log::{debug, error};
 use mongodb::Collection;
+use rand::prelude::*;
 use std::time::Duration;
 
 use crate::bot;
@@ -53,13 +54,20 @@ pub async fn remind(users: Collection, token: String) {
                             let chat_id = user.get_i64("chat_id").unwrap();
                             let user_id =
                                 user.get_i64("user_id").unwrap().to_owned();
+                            // Choose a message randomly
+                            let messages = [
+                                "Did you manage to go on that run we planned?",
+                                "Have you had your run today?",
+                                "Did you go on that run you wanted today?",
+                                "Have you had a chance to go running today?",
+                            ];
+                            let &chosen = messages
+                                .choose(&mut rand::thread_rng())
+                                .unwrap();
                             debug!("Reminding {}", user_id);
-                            if let Err(e) = bot::send_message(
-                                chat_id,
-                                "Get going!",
-                                &token,
-                            )
-                            .await
+                            if let Err(e) =
+                                bot::send_message(chat_id, chosen, &token)
+                                    .await
                             {
                                 error!(
                                     "Unable to send message to {}: {}",
