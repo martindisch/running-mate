@@ -99,11 +99,14 @@ impl Dialogue {
             StateContent {
                 message: &|_, _| Ok("You'll never see this message".into()),
                 error: "Sorry, I didn't understand. Did you go on your run as planned?",
-                transition: &|response, _, _, wit| {
+                transition: &|response, user_id, users, wit| {
                     let api_resp = wit_ai(response, wit)?;
                     match api_resp["entities"]["response"][0]["value"].as_str() {
                         Some("positive") => Ok((State::AskAboutRun, None)),
-                        Some("negative") => Ok((State::ScheduleNextRun, Some("No problem, there's always another time.".into()))),
+                        Some("negative") => Ok((State::ScheduleNextRun, Some(select_message(&[
+                            "No problem, there's always another time.",
+                            "Another time then.",
+                        ], user_id, users)?))),
                         _ => Err(FlowError::NoMatch),
                     }
                 },
@@ -126,11 +129,17 @@ impl Dialogue {
                     select_message(messages, user_id, users)
                 },
                 error: "I'm afraid I don't understand that. Do you have any running experience?",
-                transition: &|response, _, _, wit| {
+                transition: &|response, user_id, users, wit| {
                     let api_resp = wit_ai(response, wit)?;
                     match api_resp["entities"]["response"][0]["value"].as_str() {
-                        Some("positive") => Ok((State::ScheduleNextRun, Some("Great to hear!".into()))),
-                        Some("negative") => Ok((State::ScheduleNextRun, Some("That's fine, don't worry about it.".into()))),
+                        Some("positive") => Ok((State::ScheduleNextRun, Some(select_message(&[
+                            "Great to hear!", "Excellent!", "That's very good."
+                        ], user_id, users)?))),
+                        Some("negative") => Ok((State::ScheduleNextRun, Some(select_message(&[
+                            "That's fine, don't worry about it.",
+                            "Alright, this is going to be fun!",
+                            "Starting fresh is always exciting!"
+                        ], user_id, users)?))),
                         _ => Err(FlowError::NoMatch),
                     }
                 },
