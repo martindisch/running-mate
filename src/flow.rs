@@ -262,13 +262,11 @@ impl Dialogue {
                         _ => unreachable!(),
                     };
 
-                    // Read the user data again, just to be sure (since we
-                    // change it in select_message)
-                    let mut user_doc = users.find_one(doc! {"user_id": user_id}, None)?.unwrap();
                     // Insert the values we want to remember
-                    user_doc.insert("planned_date", date.to_rfc3339());
-                    user_doc.insert("planned_duration", duration.num_seconds());
-                    users.update_one(doc! {"user_id": user_id}, user_doc, None)?;
+                    users.update_one(doc! {"user_id": user_id}, doc! {"$set": {
+                        "planned_date": date.to_rfc3339(),
+                        "planned_duration": duration.num_seconds()
+                    }}, None)?;
                     debug!("Suggested {} for {} minutes to {}", date.format("%Y-%m-%d"), duration.num_minutes(), user_id);
 
                     response
