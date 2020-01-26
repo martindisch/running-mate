@@ -8,7 +8,7 @@ use mongodb::Collection;
 use rand::prelude::*;
 use std::time::Duration;
 
-use crate::bot;
+use crate::{bot, State};
 
 /// Periodically checks all users for missed runs and reminds them.
 pub async fn remind(users: Collection, token: String) {
@@ -76,6 +76,11 @@ pub async fn remind(users: Collection, token: String) {
                             } else {
                                 // Delete the date to not remind repeatedly
                                 user.remove("planned_date");
+                                // Set user's state accordingly
+                                user.insert(
+                                    "current_state",
+                                    i32::from(State::RemindInitial),
+                                );
                                 // Again, workaround for blocking API
                                 let users_cpy = users.clone();
                                 if let Err(e) =

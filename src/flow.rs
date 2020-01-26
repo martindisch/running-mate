@@ -13,8 +13,9 @@ use std::{collections::HashMap, error, fmt};
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum State {
     Initial,
+    RemindInitial,
     DetermineExperience,
-    ScheduleFirstRun,
+    ScheduleNextRun,
     AskAboutRun,
     SuggestChange,
     AskAlternative,
@@ -24,8 +25,9 @@ impl From<i32> for State {
     fn from(id: i32) -> Self {
         match id {
             0 => Self::Initial,
+            10 => Self::RemindInitial,
             30 => Self::DetermineExperience,
-            40 => Self::ScheduleFirstRun,
+            40 => Self::ScheduleNextRun,
             50 => Self::AskAboutRun,
             60 => Self::SuggestChange,
             70 => Self::AskAlternative,
@@ -40,8 +42,9 @@ impl From<State> for i32 {
     fn from(state: State) -> i32 {
         match state {
             State::Initial => 0,
+            State::RemindInitial => 10,
             State::DetermineExperience => 30,
-            State::ScheduleFirstRun => 40,
+            State::ScheduleNextRun => 40,
             State::AskAboutRun => 50,
             State::SuggestChange => 60,
             State::AskAlternative => 70,
@@ -92,6 +95,22 @@ impl Dialogue {
         );
 
         state_table.insert(
+            State::RemindInitial,
+            StateContent {
+                message: &|_, _| Ok("You'll never see this message".into()),
+                error: "Sorry, I didn't understand. Did you go on your run as planned?",
+                transition: &|response, _, _, wit| {
+                    let api_resp = wit_ai(response, wit)?;
+                    match api_resp["entities"]["response"][0]["value"].as_str() {
+                        Some("positive") => Ok((State::AskAboutRun, None)),
+                        Some("negative") => Ok((State::ScheduleNextRun, Some("No problem, there's always another time.".into()))),
+                        _ => Err(FlowError::NoMatch),
+                    }
+                },
+            },
+        );
+
+        state_table.insert(
             State::DetermineExperience,
             StateContent {
                 message: &|user_id, users| {
@@ -110,8 +129,8 @@ impl Dialogue {
                 transition: &|response, _, _, wit| {
                     let api_resp = wit_ai(response, wit)?;
                     match api_resp["entities"]["response"][0]["value"].as_str() {
-                        Some("positive") => Ok((State::ScheduleFirstRun, Some("Great to hear!".into()))),
-                        Some("negative") => Ok((State::ScheduleFirstRun, Some("That's fine, don't worry about it.".into()))),
+                        Some("positive") => Ok((State::ScheduleNextRun, Some("Great to hear!".into()))),
+                        Some("negative") => Ok((State::ScheduleNextRun, Some("That's fine, don't worry about it.".into()))),
                         _ => Err(FlowError::NoMatch),
                     }
                 },
@@ -119,7 +138,7 @@ impl Dialogue {
         );
 
         state_table.insert(
-            State::ScheduleFirstRun,
+            State::ScheduleNextRun,
             StateContent {
                 message: &|user_id, users| {
                     select_message(&[
@@ -162,9 +181,9 @@ impl Dialogue {
             StateContent {
                 message: &|user_id, users| {
                     select_message(&[
-                        "Awesome, let me know how it went as soon as you're back!",
-                        "That's great, tell me how it went when you're done!",
-                        "Very cool, be sure to tell me about it afterwards!"
+                        "Awesome, let me know how it went!",
+                        "That's great, tell me how it went!",
+                        "Very cool, be sure to tell me about it!"
                     ], user_id, users)
                 },
                 error: "I didn't understand that, please let me know how your run went.",
