@@ -137,7 +137,7 @@ impl Dialogue {
                         ], user_id, users)?))),
                         Some("negative") => Ok((State::ScheduleNextRun, Some(select_message(&[
                             "That's fine, don't worry about it.",
-                            "Alright, this is going to be fun!",
+                            "Nice, this is going to be fun!",
                             "Starting fresh is always exciting!"
                         ], user_id, users)?))),
                         _ => Err(FlowError::NoMatch),
@@ -214,8 +214,8 @@ impl Dialogue {
                             "Amazing!",
                         ], user_id, users),
                         "neutral" => select_message(&[
-                            &format!("That's pretty good, keep it up, {}.", user_name),
-                            "Nice!",
+                            &format!("Nice! Keep it up, {}.", user_name),
+                            "Very good!",
                         ], user_id, users),
                         "negative" => select_message(&[
                             &format!("No worries {}, you'll get there.", user_name),
