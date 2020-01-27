@@ -23,8 +23,8 @@ pub async fn remind(users: Collection, token: String) {
 
         // Skip if it's not between 20:00 and 20:59. Ideally this would be done
         // on a user-basis (remembering their TZ), but this will do for now.
-        let now = Local::now();
-        if now.hour() < 20 || now.hour() >= 21 {
+        let now = Utc::now();
+        if now.hour() < 19 || now.hour() >= 20 {
             debug!("It's not time yet");
             continue;
         }
