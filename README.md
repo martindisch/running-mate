@@ -5,9 +5,10 @@ A Telegram chatbot that helps you pick up running.
 It's very easy to build, but setting up a usable instance is a slightly more
 involved process. You need a Telegram bot, configure it to send webhooks to
 your endpoint, which requires a domain and TLS certificate. You also need to
-set up and train an application on Wit.ai for the natural language processing.
-A working deployment of the bot for testing is available at
-https://t.me/running_mate_bot until at least June 30th, 2020.
+set up an application on Wit.ai for the natural language processing and import
+the [training data](wit.ai/RunningMate-2020-02-03-00-54-45.zip). A working
+deployment of the bot for testing is available at https://t.me/running_mate_bot
+until at least June 30th, 2020.
 
 ## Getting started
 1. Install Docker & Docker Compose
